@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>厚涂笔触回放 · V3</title>
+<style>
+:root{color-scheme:dark;--bg:#171615;--panel:#242220;--line:#3b3732;--text:#eee9e2;--muted:#aaa198;--accent:#d49a67}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 "Microsoft YaHei",system-ui,sans-serif}
+main{max-width:1180px;margin:0 auto;padding:22px}
+header{display:flex;justify-content:space-between;align-items:end;gap:16px;margin-bottom:16px}
+h1{font-size:22px;margin:0 0 4px}p{margin:0;color:var(--muted)}
+h2{font-size:16px;margin:0 0 12px}.replay-picker{margin-bottom:16px}.replay-picker .controls{margin:0;align-items:center}
+#outputSelect{max-width:100%;flex:1;min-width:200px}
+.layout{display:grid;grid-template-columns:minmax(0,1fr) 290px;gap:16px}
+.stage{background:#0d0c0b;border:1px solid var(--line);border-radius:14px;overflow:hidden;display:flex;align-items:center;justify-content:center;min-height:400px}
+canvas{display:block;max-width:100%;max-height:76vh;object-fit:contain}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px}
+.controls{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0}
+button,select{background:#35302b;color:var(--text);border:1px solid #51483f;border-radius:8px;padding:9px 12px;cursor:pointer}
+button.primary{background:#805431;border-color:#a8794c}button:hover{filter:brightness(1.15)}
+button:disabled,select:disabled{opacity:.5;cursor:default}
+.generation{margin-bottom:16px}.generation .controls{margin:0;align-items:center}
+.generation label{margin:0;color:var(--text);font-size:14px}
+.generation .field{display:flex;align-items:center;gap:8px;max-width:100%}
+.tuning{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px}.tuning label{display:flex;justify-content:space-between;margin-bottom:8px}.tuning output{color:var(--accent);font-weight:600}.size-plan{font-size:12px;color:var(--muted);margin-top:8px;overflow-wrap:anywhere}
+.iteration-controls{display:flex;align-items:center;gap:12px}.iteration-controls input[type=range]{flex:1;min-width:0}.iteration-controls input[type=number]{width:90px;background:#35302b;color:var(--text);border:1px solid #51483f;border-radius:8px;padding:7px}
+#imageSelect{max-width:100%;min-width:220px}.exports{display:flex;gap:16px;margin-top:8px}.exports a{color:var(--accent)}
+.exports[hidden]{display:none}
+input[type=range]{width:100%;accent-color:var(--accent)}
+label{display:block;color:var(--muted);font-size:12px;margin:13px 0 5px}
+.stat{display:flex;justify-content:space-between;gap:8px;margin:8px 0;color:var(--muted)}
+.stat strong{color:var(--text);font-weight:600}
+.stage-list{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:12px;max-height:320px;overflow-y:auto;overscroll-behavior:contain;align-content:start}
+.stage-list:not(.expanded) button:nth-child(n+11){display:none}
+.stage-toggle{width:100%;margin-top:8px;font-size:12px}
+.stage-list button{font-size:12px;text-align:left;padding:8px}
+.stage-list button.active{border-color:var(--accent);background:#59412e}
+.note{font-size:12px;color:var(--muted);margin-top:12px}
+@media(max-width:800px){.layout{grid-template-columns:1fr}main{padding:12px}.stage{min-height:280px}header{flex-direction:column;align-items:flex-start}.generation .field{width:100%;display:grid;grid-template-columns:60px minmax(0,1fr)}.generation .field select{width:100%;min-width:0!important}.tuning{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<main>
+<header><div><h1>厚涂笔触回放 · V3</h1><p>多种笔刷 · 误差驱动 · 从大色块到细节</p></div><div id="loadStatus">正在读取笔触数据…</div></header>
+<section class="panel generation">
+  <h2>生成操作台</h2>
+  <div class="controls">
+    <div class="field"><label for="imageSelect">输入图片</label>
+    <select id="imageSelect" disabled><option>正在读取 input 文件夹…</option></select></div>
+    <div class="field"><label for="brushSelect">笔刷</label>
+    <select id="brushSelect">
+      <option value="ellipse">椭圆刷（前 3 阶段纯圆）</option>
+      <option value="round">圆头刷</option><option value="flat">扁平刷</option>
+      <option value="long">长条刷</option><option value="knife">刮刀</option>
+    </select></div>
+    <div class="field"><label for="directionSelect">方向</label>
+    <select id="directionSelect"><option value="sobel">Sobel 边缘方向场</option><option value="tensor">Structure Tensor 局部方向场</option></select></div>
+    <button id="refreshImages" disabled>刷新列表</button>
+    <button class="primary" id="generate" disabled>生成笔触</button>
+  </div>
+  <div class="tuning">
+    <div><label for="minDiameter">最小颗粒度 <output id="minDiameterValue" for="minDiameter">5 px</output></label>
+      <input id="minDiameter" type="range" min="1" max="35" step="1" value="5"></div>
+    <div><label for="iterations">迭代次数（阶段数）<output id="iterationsValue" for="iterations">10 次</output></label>
+      <div class="iteration-controls"><input id="iterations" type="range" min="2" max="100" step="1" value="10">
+        <input id="iterationsNumber" type="number" min="2" step="1" value="10" aria-label="自定义迭代次数"></div></div>
+  </div>
+  <p id="sizePlan" class="size-plan"></p>
+  <p id="generationStatus" class="note" role="status" aria-live="polite">选择图片和绘制参数，再点击生成笔触。</p>
+</section>
+<section class="panel replay-picker">
+  <h2>输出与回放</h2>
+  <div class="controls"><label for="outputSelect" style="margin:0">已保存结果</label>
+    <select id="outputSelect" disabled><option>正在读取 output 文件夹…</option></select>
+    <button id="refreshOutputs">刷新输出</button>
+  </div>
+  <div class="exports" id="exports" hidden>
+    <a id="previewLink" target="_blank" rel="noopener">最终预览图</a>
+    <a id="sheetLink" target="_blank" rel="noopener">阶段总览</a>
+  </div>
+</section>
+<div class="layout">
+  <section class="stage"><canvas id="paint" width="588" height="631"></canvas></section>
+  <aside class="panel">
+    <div class="controls">
+      <button class="primary" id="play">▶ 一键播放</button>
+      <button id="pause">Ⅱ 暂停</button>
+      <button id="reset">↺ 重置</button>
+    </div>
+    <label for="progress">绘制进度</label><input id="progress" type="range" min="0" max="1" value="0" step="0.0001">
+    <div class="stat"><span>当前笔触</span><strong id="count">0 / 0</strong></div>
+    <div class="stat"><span>当前阶段</span><strong id="stage">未开始</strong></div>
+    <div class="stat"><span>笔刷直径</span><strong id="brush">—</strong></div>
+    <label for="speed">播放速度</label>
+    <select id="speed"><option value="1">1× 正常</option><option value="2">2×</option><option value="4" selected>4×</option><option value="8">8×</option><option value="16">16×</option></select>
+    <label>按阶段查看</label>
+    <div class="stage-list" id="stageList"></div>
+    <button class="stage-toggle" id="toggleStages" aria-controls="stageList" aria-expanded="false" hidden>展开更多阶段</button>
+    <div class="note">大笔刷铺色，逐级缩小到所选的最小颗粒度；椭圆刷前期纯圆起稿。方向可选 Sobel 或 Structure Tensor，颜色按笔刷覆盖范围拟合，按颜色与边缘误差选笔。</div>
+  </aside>
+</div>
+</main>
+<script src="brush.js"></script>
+<script>
+const canvas=document.getElementById('paint'),ctx=canvas.getContext('2d',{willReadFrequently:true});
+const $=id=>document.getElementById(id);
+let data=null,strokes=[],index=0,playing=false,stageNames=[],stageCounts=[],raf=0;
+let images=[],outputs=[],busy=false,generationReady=false,loadVersion=0;
+function updatePlan(){
+  const minimum=Number($('minDiameter').value),iterations=Number($('iterations').value);
+  $('iterationsNumber').value=iterations;$('iterationsNumber').setCustomValidity('');
+  $('minDiameterValue').textContent=minimum+' px';$('iterationsValue').textContent=iterations+' 次';
+  $('brushSelect').querySelector('option[value="ellipse"]').textContent=`椭圆刷（前 ${Math.min(3,iterations-1)} 阶段纯圆）`;
+  const indices=iterations<=20?Array.from({length:iterations},(_,i)=>i):[0,1,2,null,iterations-3,iterations-2,iterations-1];
+  const sizes=indices.map(i=>i===null?'…':Number((35+(minimum-35)*i/(iterations-1)).toFixed(2)));
+  $('sizePlan').textContent='笔刷尺寸：'+sizes.join(' → ')+' px。每次迭代对应一个阶段，最小颗粒度越大，保留的笔触块感越强。';
+}
+function setIterations(value){
+  if(!Number.isSafeInteger(value)||value<2){
+    $('iterationsNumber').setCustomValidity('请输入不小于 2 的整数');return false;
+  }
+  if(value>Number($('iterations').max))$('iterations').max=value;
+  $('iterations').value=value;updatePlan();return true;
+}
+function restorePlan(job){
+  if(job.minDiameter!==undefined)$('minDiameter').value=job.minDiameter;
+  if(job.stages!==undefined)setIterations(job.stages);
+  updatePlan();
+}
+$('minDiameter').oninput=$('iterations').oninput=updatePlan;updatePlan();
+$('iterationsNumber').oninput=()=>setIterations(Number($('iterationsNumber').value));
+function background(){
+  ctx.fillStyle='#30231e';ctx.fillRect(0,0,canvas.width,canvas.height);
+}
+function dab(s){paintStroke(ctx,s)}
+function drawUntil(n){
+  background();
+  for(let i=0;i<n;i++)dab(strokes[i]);
+  index=n;updateUI();
+}
+function updateUI(){
+  $('progress').value=strokes.length?index/strokes.length:0;
+  $('count').textContent=index.toLocaleString()+' / '+strokes.length.toLocaleString();
+  const s=index?strokes[Math.min(index-1,strokes.length-1)]:null;
+  $('stage').textContent=s?`${s.stage} · ${stageNames[s.stage-1]}`:'未开始';
+  $('brush').textContent=s?`${s.d}px`:'—';
+  document.querySelectorAll('.stage-list button').forEach(b=>b.classList.toggle('active',Number(b.dataset.stage)===(s?s.stage:0)));
+  const remaining=Math.max(0,stageNames.length-10),expanded=$('stageList').classList.contains('expanded');
+  $('toggleStages').hidden=!remaining;
+  $('toggleStages').setAttribute('aria-expanded',String(expanded));
+  $('toggleStages').textContent=expanded?'收起至前 10 个阶段':`展开其余 ${remaining} 个阶段`+(s?.stage>10?` · 当前第 ${s.stage} 阶段`:'');
+}
+$('toggleStages').onclick=()=>{
+  const expanded=$('stageList').classList.toggle('expanded');
+  if(!expanded)$('stageList').scrollTop=0;
+  updateUI();
+};
+function tick(t){
+  if(!playing)return;
+  const speed=Number($('speed').value);
+  const amount=Math.max(1,Math.floor(speed*5));
+  const end=Math.min(strokes.length,index+amount);
+  for(;index<end;index++)dab(strokes[index]);
+  updateUI();
+  if(index>=strokes.length){playing=false;return;}
+  raf=requestAnimationFrame(tick);
+}
+function play(){if(!data||playing)return;if(index>=strokes.length)drawUntil(0);playing=true;raf=requestAnimationFrame(tick)}
+function pause(){playing=false;cancelAnimationFrame(raf)}
+$('play').onclick=play;$('pause').onclick=pause;$('reset').onclick=()=>{pause();drawUntil(0)};
+$('progress').oninput=e=>{pause();drawUntil(Math.round(Number(e.target.value)*strokes.length))};
+$('stageList').addEventListener('click',e=>{
+  const b=e.target.closest('button[data-stage]');if(!b)return;
+  pause();const st=Number(b.dataset.stage);
+  drawUntil(stageCounts[st-1]);
+});
+async function api(url,options){
+  const r=await fetch(url,options);
+  let value;
+  try{value=await r.json()}catch{throw Error('无法连接生成服务，请通过 run.bat 启动网页')}
+  if(!r.ok)throw Error(value.error||'请求失败');
+  return value;
+}
+async function checkServer(){
+  try{
+    const r=await fetch('/api/status',{cache:'no-store'});
+    if(!r.ok)throw Error();
+    const status=await r.json();
+    if(status.apiVersion!==3||status.restartRequired)throw Error();
+    generationReady=true;setBusy(busy);
+  }catch{
+    generationReady=false;setBusy(busy);
+    throw Error('当前生成服务是旧版本或代码已更新。请关闭旧 CMD，重新运行 run.bat，并使用新打开的网页；仅刷新网页不能更新 Python 服务。');
+  }
+}
+function setBusy(value){
+  busy=value;
+  $('imageSelect').disabled=busy||!images.length;
+  $('refreshImages').disabled=busy;
+  $('generate').disabled=busy||!images.length||!generationReady;
+  $('brushSelect').disabled=busy;$('directionSelect').disabled=busy;
+  $('minDiameter').disabled=busy;$('iterations').disabled=busy;$('iterationsNumber').disabled=busy;
+}
+function clearPainting(message){
+  pause();data=null;strokes=[];index=0;stageNames=[];stageCounts=[];
+  $('stageList').replaceChildren();$('exports').hidden=true;
+  $('stageList').classList.remove('expanded');$('stageList').scrollTop=0;
+  for(const id of ['play','pause','reset','progress'])$(id).disabled=true;
+  background();updateUI();$('loadStatus').textContent=message;
+}
+async function loadPainting(showFinal=false,expected=null){
+  const version=++loadVersion;
+  const item=outputs.find(i=>i.id===$('outputSelect').value);
+  clearPainting(item?'正在读取笔触数据…':'output 文件夹暂无可回放结果');
+  if(!item)return;
+  try{
+    const r=await fetch(item.outputURL+'strokes.json');
+    if(!r.ok)throw Error('无法读取所选图片的笔触数据');
+    const d=await r.json();
+    if(version!==loadVersion)return;
+    if(expected&&(d.stageNames.length!==expected.stages||d.minDiameter!==expected.minDiameter))
+      throw Error('输出参数与请求不一致，请重启服务后重新生成。');
+  data=d;strokes=d.strokes;stageNames=d.stageNames;
+  canvas.width=d.width;canvas.height=d.height;
+  let total=0;stageCounts=d.stageStrokeCounts.map(n=>(total+=n));
+  $('loadStatus').textContent=`${item.label} · 已载入 ${strokes.length.toLocaleString()} 笔`;
+  d.stageNames.forEach((name,i)=>{
+    const b=document.createElement('button');b.dataset.stage=i+1;b.textContent=`${i+1}. ${name}`;
+    $('stageList').appendChild(b);
+  });
+    for(const id of ['play','pause','reset','progress'])$(id).disabled=false;
+    $('previewLink').href=item.outputURL+'preview.png';
+    $('sheetLink').href=item.outputURL+'stage_contact_sheet.png';$('exports').hidden=false;
+    drawUntil(showFinal?strokes.length:0);
+  }catch(err){if(version===loadVersion)clearPainting(err.message)}
+}
+async function refreshImages(preferred){
+  const response=await api('/api/images');
+  const selected=preferred||$('imageSelect').value;
+  images=response.images;$('imageSelect').replaceChildren();
+  for(const item of images){
+    const option=document.createElement('option');option.value=item.name;
+    option.textContent=item.name+(item.hasOutput?' · 已生成':' · 未生成');$('imageSelect').appendChild(option);
+  }
+  if(images.some(i=>i.name===selected))$('imageSelect').value=selected;
+  if(!images.length){
+    const option=document.createElement('option');option.textContent='input 文件夹中没有图片';$('imageSelect').appendChild(option);
+    $('generationStatus').textContent='请将图片放入 input 文件夹，再点击刷新列表。';
+  }
+  setBusy(busy);
+}
+async function refreshOutputs(preferred){
+  const response=await api('/api/outputs');
+  const selected=preferred||$('outputSelect').value;
+  outputs=response.outputs;$('outputSelect').replaceChildren();
+  for(const item of outputs){
+    const option=document.createElement('option');option.value=item.id;option.textContent=item.label;
+    $('outputSelect').appendChild(option);
+  }
+  if(outputs.some(i=>i.id===selected))$('outputSelect').value=selected;
+  else if(outputs.length)$('outputSelect').value=(outputs.find(i=>!i.legacy)||outputs[0]).id;
+  else{
+    const option=document.createElement('option');option.textContent='output 文件夹中没有结果';$('outputSelect').appendChild(option);
+  }
+  $('outputSelect').disabled=!outputs.length;
+}
+async function pollJob(){
+  try{
+    const {job}=await api('/api/job');
+    if(!job)throw Error('未找到生成任务');
+    $('generationStatus').textContent=`${job.image}：${job.message}`;
+    if(job.status==='running'){setTimeout(pollJob,700);return}
+    $('brushSelect').value=job.brush;$('directionSelect').value=job.direction;
+    restorePlan(job);
+    await refreshImages(job.image);
+    if(job.status==='completed'){
+      await refreshOutputs(job.outputId);
+      await loadPainting(true,job);
+    }
+    setBusy(false);
+  }catch(err){
+    $('generationStatus').textContent=err.message+'；正在重新连接…';
+    setTimeout(pollJob,1500);
+  }
+}
+$('imageSelect').onchange=()=>{$('generationStatus').textContent='点击生成笔触可生成所选图片，结果与当前回放分别管理。'};
+$('brushSelect').onchange=$('directionSelect').onchange=()=>{
+  $('generationStatus').textContent='按当前笔刷与方向生成结果，各组合分别保存。';
+};
+$('refreshImages').onclick=async()=>{
+  try{await refreshImages()}catch(err){$('generationStatus').textContent=err.message}
+};
+$('outputSelect').onchange=()=>loadPainting();
+$('refreshOutputs').onclick=async()=>{
+  try{await refreshOutputs();await loadPainting()}catch(err){$('loadStatus').textContent=err.message}
+};
+$('generate').onclick=async()=>{
+  if(!$('iterationsNumber').reportValidity())return;
+  pause();setBusy(true);
+  try{
+    await checkServer();
+    const request={image:$('imageSelect').value,brush:$('brushSelect').value,direction:$('directionSelect').value,minDiameter:Number($('minDiameter').value),stages:Number($('iterations').value)};
+    const {job}=await api('/api/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(request)});
+    if(job.stages!==request.stages||job.minDiameter!==request.minDiameter)
+      throw Error('服务没有接收所选参数，请关闭旧 CMD 后重新运行 run.bat。');
+    $('generationStatus').textContent=`${job.image}：已接收最小 ${job.minDiameter} px、${job.stages} 步。${job.message}`;pollJob();
+  }catch(err){setBusy(false);$('generationStatus').textContent=err.message}
+};
+clearPainting('请选择输入图片');
+(async()=>{
+  try{await checkServer()}catch(err){$('generationStatus').textContent=err.message}
+  try{
+    await Promise.all([refreshImages(),refreshOutputs()]);
+    const {job}=await api('/api/job');
+    if(generationReady&&job?.status==='running'){
+      if(images.some(i=>i.name===job.image))$('imageSelect').value=job.image;
+      $('brushSelect').value=job.brush;$('directionSelect').value=job.direction;
+      restorePlan(job);
+      setBusy(true);pollJob();
+    }
+    await loadPainting();
+  }catch(err){$('generationStatus').textContent=err.message;$('refreshImages').disabled=false}
+})();
+</script>
+</body></html>

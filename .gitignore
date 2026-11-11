@@ -1,0 +1,16 @@
+# Local inputs and generated paintings
+/input/*
+!/input/.gitkeep
+/output/*
+!/output/.gitkeep
+
+# JPEG images anywhere in the repository, case-insensitive
+*.[jJ][pP][gG]
+*.[jJ][pP][eE][gG]
+
+# Python caches and virtual environments
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
