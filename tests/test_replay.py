@@ -162,8 +162,7 @@ class ReplayTest(unittest.TestCase):
                         self.assertFalse(next(i for i in catalogue(root) if i['name'] == names[0])['hasOutput'])
                         # Saved playback does not depend on the input catalogue.
                         (root / 'input' / names[0]).unlink()
-                        page.locator('#refreshImages').click()
-                        page.locator('#refreshOutputs').click()
+                        page.evaluate("async()=>{await document.querySelector('#refreshImages').onclick();await document.querySelector('#refreshOutputs').onclick()}")
                         page.select_option('#outputSelect', result_id(names[0], 'knife'))
                         page.wait_for_function("document.querySelector('#previewLink').getAttribute('href').includes('knife-sobel')")
                         page.wait_for_function("!document.querySelector('#play').disabled")

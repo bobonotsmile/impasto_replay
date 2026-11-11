@@ -4,9 +4,10 @@
 /output/*
 !/output/.gitkeep
 
-# JPEG images anywhere in the repository, case-insensitive
+# JPEG and PNG images anywhere in the repository, case-insensitive
 *.[jJ][pP][gG]
 *.[jJ][pP][eE][gG]
+*.[pP][nN][gG]
 
 # Python caches and virtual environments
 __pycache__/

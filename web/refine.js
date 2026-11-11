@@ -33,6 +33,7 @@ function structureTensorField(gx,gy,w,h,radius){
 }
 window.refinePainting = async function(data, sourceURL, specs, seed) {
   const w=data.width,h=data.height,N=w*h;
+  const options=data.settings||{};
   const canvas=document.createElement('canvas');canvas.width=w;canvas.height=h;
   const ctx=canvas.getContext('2d',{willReadFrequently:true});
   ctx.fillStyle='#30231e';ctx.fillRect(0,0,w,h);
@@ -59,6 +60,18 @@ window.refinePainting = async function(data, sourceURL, specs, seed) {
     if(masks.size>=256)masks.delete(masks.keys().next().value);
     masks.set(key,value);return value;
   }
+  function candidateMask(s){
+    if(!s.points&&s.brushStyle!=='textured'&&s.pressureMode!=='taper'&&s.paintMode!=='dry'){
+      const old=brushMask(s.d,s.angle,s.brush);
+      return {left:-old.radius,top:-old.radius,width:old.side,height:old.side,mask:old.mask};
+    }
+    const bounds=strokeBounds(s);
+    patch.width=bounds.width;patch.height=bounds.height;
+    paintStroke(pc,{...s,x:-bounds.left,y:-bounds.top,alpha:1,color:'#ffffff'});
+    const pixels=pc.getImageData(0,0,bounds.width,bounds.height).data,mask=new Float32Array(bounds.width*bounds.height);
+    for(let i=0;i<mask.length;i++)mask[i]=pixels[i*4+3]/255;
+    return {...bounds,mask};
+  }
   const metrics=[];
   for(let specIndex=0;specIndex<specs.length;specIndex++){
     const spec=specs[specIndex],stage=data.stageNames.length+1;
@@ -82,6 +95,37 @@ window.refinePainting = async function(data, sourceURL, specs, seed) {
       const magnitude=Math.hypot(gx[p],gy[p]);
       coherence[p]=tensor?tensor.confidence[p]:magnitude/(magnitude+8);
     }
+    function directionAt(x,y){
+      const p=Math.max(0,Math.min(h-1,Math.round(y)))*w+Math.max(0,Math.min(w-1,Math.round(x)));
+      return coherence[p]>.05?(tensor?tensor.angles[p]:Math.atan2(gy[p],gx[p])*180/Math.PI+90):45;
+    }
+    function tracePath(x,y,d,length){
+      const center=Math.round(y)*w+Math.round(x),step=Math.max(.5,d*.3);
+      const count=Math.min(24,Math.max(1,Math.ceil(d*length/2/step)));
+      function side(sign){
+        const points=[];let px=x,py=y,previous=directionAt(x,y)+(sign<0?180:0);
+        for(let i=0;i<count;i++){
+          let angle=directionAt(px,py);
+          if(Math.cos((angle-previous)*Math.PI/180)<0)angle+=180;
+          if(Math.abs(Math.atan2(Math.sin((angle-previous)*Math.PI/180),Math.cos((angle-previous)*Math.PI/180)))>.65)break;
+          const nx=px+Math.cos(angle*Math.PI/180)*step,ny=py+Math.sin(angle*Math.PI/180)*step;
+          if(nx<1||ny<1||nx>=w-1||ny>=h-1)break;
+          const q=Math.round(ny)*w+Math.round(nx);
+          let difference=0;for(let c=0;c<3;c++)difference+=(target[q*4+c]-target[center*4+c])**2;
+          if(difference>65**2||Math.abs(targetY[q]-targetY[center])>30)break;
+          points.push({x:Math.round((nx-x)*100)/100,y:Math.round((ny-y)*100)/100});
+          px=nx;py=ny;previous=angle;
+        }
+        return points;
+      }
+      const points=[...side(-1).reverse(),{x:0,y:0},...side(1)];
+      for(let i=0;i<points.length;i++){
+        const a=points[Math.max(0,i-1)],b=points[Math.min(points.length-1,i+1)];
+        points[i].angle=Math.round(Math.atan2(b.y-a.y,b.x-a.x)*180/Math.PI);
+        points[i].pressure=points.length>1?.3+.7*Math.sin(Math.PI*i/(points.length-1)):.7;
+      }
+      return points;
+    }
     const error=new Float32Array(N),failures=new Uint8Array(N);
     function loss(p,r,g,b,nextY,rightY,downY){
       let value=weight[p]*(r*r+g*g+b*b+1.5*nextY*nextY);
@@ -100,7 +144,7 @@ window.refinePainting = async function(data, sourceURL, specs, seed) {
     };
     for(let p=0;p<N;p++)error[p]=currentError(p);
     const mseBefore=mse(),lossBefore=error.reduce((a,b)=>a+b,0)/(N*3);
-    let accepted=0,attempts=0,candidates=0;
+    let accepted=0,attempts=0,candidates=0,anchor=null,cluster=0,misses=0;
     while(accepted<spec.count&&attempts<spec.count*6){
       attempts++;
       // Pool neighboring errors to prefer incomplete regions over one noisy
@@ -108,12 +152,24 @@ window.refinePainting = async function(data, sourceURL, specs, seed) {
       let best=0,bestScore=-1;
       const reach=Math.max(1,Math.round(spec.d*.3));
       for(let k=0;k<24;k++){
-        const p=Math.floor(random()*N),x=p%w,y=Math.floor(p/w);
+        let p;
+        const local=options.placementMode==='local'&&anchor&&random()<(options.locality??.75);
+        if(local){
+          const radius=Math.max(12,spec.d*5),theta=random()*Math.PI*2,r=Math.sqrt(random())*radius;
+          p=Math.max(0,Math.min(h-1,Math.round(anchor.y+Math.sin(theta)*r)))*w+
+            Math.max(0,Math.min(w-1,Math.round(anchor.x+Math.cos(theta)*r)));
+        }else p=Math.floor(random()*N);
+        const x=p%w,y=Math.floor(p/w);
         let region=error[p];
         for(const [dx,dy] of [[reach,0],[-reach,0],[0,reach],[0,-reach]])
           region+=error[Math.max(0,Math.min(h-1,y+dy))*w+Math.max(0,Math.min(w-1,x+dx))];
         const center=.2+detail*.6;
-        const score=(center*error[p]+(1-center)*region/5)/(1+failures[p]*2);
+        let score=(center*error[p]+(1-center)*region/5)/(1+failures[p]*2);
+        if(local)score*=1.4;
+        if(options.toneMode==='dark-light'){
+          const preference=.15+.85*Math.exp(-.5*((targetY[p]-(40+detail*180))/75)**2);
+          score*=1-(options.toneStrength??.7)+(options.toneStrength??.7)*preference;
+        }
         if(score>bestScore){best=p;bestScore=score;}
       }
       if(bestScore<.02)break;
@@ -123,19 +179,28 @@ window.refinePainting = async function(data, sourceURL, specs, seed) {
       angle=Math.round(angle);
       const proposals=brush==='round'?[{scale:1},{scale:.72}]:
         [{scale:1},{scale:.78},{scale:1,opacity:.7}];
+      if(options.optimizationMode==='efficient'&&options.strokeMode==='path')proposals.push({scale:1,length:1.5});
       let winner=null;
       for(const proposal of proposals){
         const d=Math.max(spec.minDiameter??.75,Math.round(spec.d*proposal.scale*10000)/10000);
         const direction=brush==='round'?0:angle;
         const alpha=proposal.opacity??(detail<.15?.97:Math.round((.94-detail*.12)*100)/100);
-        const {radius,side,mask}=brushMask(d,direction,brush);
-        const left=Math.max(0,x-radius),top=Math.max(0,y-radius);
-        const pw=Math.min(w,x+radius+1)-left,ph=Math.min(h,y+radius+1)-top;
+        const stroke={x,y,d,brush,angle:direction,alpha,stage};
+        if(options.strokeMode==='path')stroke.points=tracePath(x,y,d,(options.strokeLength??3)*(proposal.length??1));
+        if(options.strokeMode==='path'||options.brushStyle==='textured'||options.pressureMode==='taper'||options.paintMode==='dry'){
+          Object.assign(stroke,{minDiameter:spec.minDiameter,brushStyle:options.brushStyle||'solid',
+            textureStrength:options.textureStrength??.3,textureSeed:(Math.imul(x+1,73856093)^Math.imul(y+1,19349663)^stage)>>>0,
+            pressureMode:options.pressureMode||'stage',pressureStrength:options.pressureStrength??.7,
+            pressure:.6+.4*Math.abs(Math.sin(accepted*1.7+stage)),paintMode:options.paintMode||'uniform',paintLoad:options.paintLoad??.8});
+        }
+        const bounds=candidateMask(stroke),{mask}=bounds;
+        const left=Math.max(0,x+bounds.left),top=Math.max(0,y+bounds.top);
+        const pw=Math.min(w,x+bounds.left+bounds.width)-left,ph=Math.min(h,y+bounds.top+bounds.height)-top;
         const original=ctx.getImageData(left,top,pw,ph);
         let denom=0,red=0,green=0,blue=0,oldLoss=0;
         for(let yy=0;yy<ph;yy++)for(let xx=0;xx<pw;xx++){
           const p=(top+yy)*w+left+xx,i=p*4;
-          const a=mask[(top+yy-y+radius)*side+left+xx-x+radius]*alpha;
+          const a=mask[(top+yy-y-bounds.top)*bounds.width+left+xx-x-bounds.left]*alpha;
           const weighted=weight[p]*a;
           denom+=weighted*a;
           red+=weighted*(target[i]-(1-a)*pixels[i]);
@@ -145,7 +210,7 @@ window.refinePainting = async function(data, sourceURL, specs, seed) {
         }
         if(denom<1e-8)continue;
         const rgb=[red,green,blue].map(v=>Math.max(0,Math.min(255,Math.round(v/denom))));
-        const s={x,y,d,brush,angle:direction,alpha,stage,color:'#'+rgb.map(v=>v.toString(16).padStart(2,'0')).join('')};
+        const s={...stroke,color:'#'+rgb.map(v=>v.toString(16).padStart(2,'0')).join('')};
         patch.width=pw;patch.height=ph;pc.putImageData(original,0,0);
         pc.save();pc.translate(-left,-top);paintStroke(pc,s);pc.restore();
         const next=pc.getImageData(0,0,pw,ph),nextResidual=new Float32Array(pw*ph);
@@ -162,9 +227,12 @@ window.refinePainting = async function(data, sourceURL, specs, seed) {
         }
         candidates++;
         const gain=oldLoss-newLoss;
-        if(gain>1e-4&&(!winner||gain>winner.gain))winner={s,gain,next,nextResidual,left,top,pw,ph};
+        const efficient=options.optimizationMode==='efficient';
+        const utility=efficient?gain/(1+.05*(s.points?.length??1)):gain;
+        if(gain>(efficient?Math.max(.1,oldLoss*.0001):1e-4)&&(!winner||utility>winner.utility))
+          winner={s,gain,utility,next,nextResidual,left,top,pw,ph};
       }
-      if(!winner){failures[best]=Math.min(30,failures[best]+1);continue;}
+      if(!winner){failures[best]=Math.min(30,failures[best]+1);if(++misses>12)anchor=null;continue;}
       const {s,next,nextResidual,left,top,pw,ph}=winner;
       ctx.putImageData(next,left,top);
       for(let yy=0;yy<ph;yy++)for(let xx=0;xx<pw;xx++){
@@ -178,6 +246,7 @@ window.refinePainting = async function(data, sourceURL, specs, seed) {
         const p=(top+yy)*w+left+xx;error[p]=currentError(p);
       }
       data.strokes.push(s);accepted++;
+      misses=0;anchor={x,y};if(++cluster>=12){anchor=null;cluster=0;}
     }
     data.stageNames.push(spec.name);
     data.stageBrushDiameters.push(spec.d);data.stageStrokeCounts.push(accepted);

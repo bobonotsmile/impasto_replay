@@ -1,0 +1,63 @@
+{
+  "version": 1,
+  "presets": [
+    {
+      "id": "classic",
+      "name": "经典铺色",
+      "builtin": true,
+      "settings": {
+        "brush": "ellipse",
+        "direction": "sobel",
+        "minDiameter": 5,
+        "maxDiameter": 35,
+        "stages": 10,
+        "seed": 20261110,
+        "brushStyle": "solid",
+        "textureStrength": 0.3,
+        "strokeMode": "stamp",
+        "strokeLength": 3,
+        "placementMode": "global",
+        "locality": 0.75,
+        "pressureMode": "stage",
+        "pressureStrength": 0.7,
+        "toneMode": "reference",
+        "toneStrength": 0.7,
+        "paintMode": "uniform",
+        "paintLoad": 0.8,
+        "optimizationMode": "error",
+        "strokeBudget": 0,
+        "replayMode": "single",
+        "replaySpeed": "4"
+      }
+    },
+    {
+      "id": "flow",
+      "name": "流韵厚涂",
+      "builtin": true,
+      "settings": {
+        "brush": "round",
+        "direction": "tensor",
+        "minDiameter": 1,
+        "maxDiameter": 35,
+        "stages": 10,
+        "seed": 20261110,
+        "brushStyle": "textured",
+        "textureStrength": 0.2,
+        "strokeMode": "path",
+        "strokeLength": 3,
+        "placementMode": "local",
+        "locality": 0.75,
+        "pressureMode": "taper",
+        "pressureStrength": 0.5,
+        "toneMode": "dark-light",
+        "toneStrength": 0.5,
+        "paintMode": "dry",
+        "paintLoad": 0.95,
+        "optimizationMode": "efficient",
+        "strokeBudget": 12000,
+        "replayMode": "single",
+        "replaySpeed": "4"
+      }
+    }
+  ]
+}

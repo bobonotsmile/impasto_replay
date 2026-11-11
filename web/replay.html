@@ -18,6 +18,12 @@ canvas{display:block;max-width:100%;max-height:76vh;object-fit:contain}
 .panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px}
 .controls{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0}
 button,select{background:#35302b;color:var(--text);border:1px solid #51483f;border-radius:8px;padding:9px 12px;cursor:pointer}
+input[type=text],.advanced input[type=number]{background:#35302b;color:var(--text);border:1px solid #51483f;border-radius:8px;padding:8px;max-width:100%;width:100%}
+.preset-controls{margin-bottom:14px!important}.preset-controls input{width:180px}.preset-controls a{color:var(--accent);font-size:12px}
+.advanced{margin-top:14px}.advanced summary,.result-details summary{cursor:pointer;color:var(--accent)}
+.advanced-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px 20px;margin-top:14px;max-height:420px;overflow-y:auto;padding-right:6px}
+.advanced-grid label{display:flex;justify-content:space-between;margin-bottom:6px}.advanced-grid select{width:100%}
+.result-details{margin-top:12px}.result-details pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:220px;overflow-y:auto;font-size:12px}
 button.primary{background:#805431;border-color:#a8794c}button:hover{filter:brightness(1.15)}
 button:disabled,select:disabled{opacity:.5;cursor:default}
 .generation{margin-bottom:16px}.generation .controls{margin:0;align-items:center}
@@ -37,7 +43,7 @@ label{display:block;color:var(--muted);font-size:12px;margin:13px 0 5px}
 .stage-list button{font-size:12px;text-align:left;padding:8px}
 .stage-list button.active{border-color:var(--accent);background:#59412e}
 .note{font-size:12px;color:var(--muted);margin-top:12px}
-@media(max-width:800px){.layout{grid-template-columns:1fr}main{padding:12px}.stage{min-height:280px}header{flex-direction:column;align-items:flex-start}.generation .field{width:100%;display:grid;grid-template-columns:60px minmax(0,1fr)}.generation .field select{width:100%;min-width:0!important}.tuning{grid-template-columns:1fr}}
+@media(max-width:800px){.layout{grid-template-columns:1fr}main{padding:12px}.stage{min-height:280px}header{flex-direction:column;align-items:flex-start}.generation .field{width:100%;display:grid;grid-template-columns:60px minmax(0,1fr)}.generation .field select{width:100%;min-width:0!important}.tuning,.advanced-grid{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -45,6 +51,13 @@ label{display:block;color:var(--muted);font-size:12px;margin:13px 0 5px}
 <header><div><h1>厚涂笔触回放 · V3</h1><p>多种笔刷 · 误差驱动 · 从大色块到细节</p></div><div id="loadStatus">正在读取笔触数据…</div></header>
 <section class="panel generation">
   <h2>生成操作台</h2>
+  <div class="controls preset-controls">
+    <label for="paintPreset">绘画预设</label><select id="paintPreset" disabled><option>正在读取预设…</option></select>
+    <input id="presetName" type="text" maxlength="60" placeholder="保存名称" aria-label="自定义预设名称">
+    <button id="savePreset" disabled>保存 / 更新预设</button>
+    <a href="/presets.json" download="presets.json">下载预设 JSON</a>
+  </div>
+  <p id="presetStatus" class="note" role="status">修改任意绘画参数后会变为自定义，保存到项目根目录 presets.json。</p>
   <div class="controls">
     <div class="field"><label for="imageSelect">输入图片</label>
     <select id="imageSelect" disabled><option>正在读取 input 文件夹…</option></select></div>
@@ -67,6 +80,7 @@ label{display:block;color:var(--muted);font-size:12px;margin:13px 0 5px}
         <input id="iterationsNumber" type="number" min="2" step="1" value="10" aria-label="自定义迭代次数"></div></div>
   </div>
   <p id="sizePlan" class="size-plan"></p>
+  <details class="advanced"><summary>高级画法参数</summary><div class="advanced-grid" id="advancedSettings"></div></details>
   <p id="generationStatus" class="note" role="status" aria-live="polite">选择图片和绘制参数，再点击生成笔触。</p>
 </section>
 <section class="panel replay-picker">
@@ -79,6 +93,8 @@ label{display:block;color:var(--muted);font-size:12px;margin:13px 0 5px}
     <a id="previewLink" target="_blank" rel="noopener">最终预览图</a>
     <a id="sheetLink" target="_blank" rel="noopener">阶段总览</a>
   </div>
+  <details class="result-details"><summary>查看生成参数与版本</summary><pre id="resultSettings">请选择一个结果。</pre>
+    <button id="useResultSettings" disabled>使用此结果的参数</button></details>
 </section>
 <div class="layout">
   <section class="stage"><canvas id="paint" width="588" height="631"></canvas></section>
@@ -94,6 +110,8 @@ label{display:block;color:var(--muted);font-size:12px;margin:13px 0 5px}
     <div class="stat"><span>笔刷直径</span><strong id="brush">—</strong></div>
     <label for="speed">播放速度</label>
     <select id="speed"><option value="1">1× 正常</option><option value="2">2×</option><option value="4" selected>4×</option><option value="8">8×</option><option value="16">16×</option></select>
+    <label for="replayMode">回放节奏</label><select id="replayMode"><option value="batch">批量回放</option><option value="single" selected>每帧一笔</option></select>
+    <p class="note">逐笔模式同样支持倍速；高倍速时屏幕会显示多笔的累计结果。</p>
     <label>按阶段查看</label>
     <div class="stage-list" id="stageList"></div>
     <button class="stage-toggle" id="toggleStages" aria-controls="stageList" aria-expanded="false" hidden>展开更多阶段</button>
@@ -107,14 +125,103 @@ const canvas=document.getElementById('paint'),ctx=canvas.getContext('2d',{willRe
 const $=id=>document.getElementById(id);
 let data=null,strokes=[],index=0,playing=false,stageNames=[],stageCounts=[],raf=0;
 let images=[],outputs=[],busy=false,generationReady=false,loadVersion=0;
+let playbackLast=null,playbackCarry=0;
+function resetPlaybackClock(){playbackLast=null;playbackCarry=0}
+let presets=[],defaults={},presetsReady=false,editingPresetId=null,loadedSettings=null;
+const CORE_FIELDS={brush:'brushSelect',direction:'directionSelect',minDiameter:'minDiameter',stages:'iterationsNumber',replayMode:'replayMode',replaySpeed:'speed'};
+const FIELD_LABELS={maxDiameter:'起始笔刷尺寸（px）',seed:'随机种子',brushStyle:'笔刷表现',textureStrength:'纹理强度',strokeMode:'笔触形态',strokeLength:'笔触长度（尺寸倍数）',placementMode:'落笔组织',locality:'局部停留程度',pressureMode:'轻重动态',pressureStrength:'压感强度',toneMode:'用色顺序',toneStrength:'顺序约束强度',paintMode:'颜料覆盖',paintLoad:'颜料量',optimizationMode:'优化目标',strokeBudget:'总笔数上限（0 为自动）'};
+function field(key){return $(CORE_FIELDS[key]||'setting_'+key)}
+function readSettings(){
+  return Object.fromEntries(Object.entries(defaults).map(([key,value])=>[key,typeof value==='number'?Number(field(key).value):field(key).value]));
+}
+function markCustom(){
+  if(!presetsReady)return;
+  $('paintPreset').value='custom';$('presetStatus').textContent='自定义参数尚未保存；可另存为新预设，或更新当前个人预设。';
+}
+function applySettings(settings,presetId='custom'){
+  const values={...defaults,...settings};
+  field('maxDiameter').value=values.maxDiameter;$('minDiameter').max=values.maxDiameter;
+  for(const key of Object.keys(defaults))field(key).value=values[key];
+  setIterations(values.stages);updatePlan();
+  const preset=presets.find(p=>p.id===presetId);
+  $('paintPreset').value=preset?preset.id:'custom';
+  editingPresetId=preset&&!preset.builtin?preset.id:null;
+  $('presetName').value=preset&&!preset.builtin?preset.name:'';
+  $('presetStatus').textContent=preset?'已应用：'+preset.name:'已载入自定义参数，可命名保存。';
+}
+function buildAdvanced(schema){
+  for(const key of Object.keys(defaults)){
+    if(CORE_FIELDS[key])continue;
+    const group=document.createElement('div'),label=document.createElement('label');
+    label.htmlFor='setting_'+key;label.textContent=FIELD_LABELS[key]||key;group.appendChild(label);
+    let input;
+    if(schema.choices[key]){
+      input=document.createElement('select');
+      for(const [value,name] of Object.entries(schema.choices[key])){
+        const option=document.createElement('option');option.value=value;option.textContent=name;input.appendChild(option);
+      }
+    }else{
+      input=document.createElement('input');const [low,high]=schema.numbers[key];
+      input.type=high===1?'range':'number';input.min=low;if(high!==null)input.max=high;
+      input.step=high===1?.05:1;
+      if(high===1){
+        const value=document.createElement('output');value.id='value_'+key;label.appendChild(value);
+      }
+    }
+    input.id='setting_'+key;input.value=defaults[key];
+    input.oninput=()=>{updateAdvancedReadouts();if(key==='maxDiameter')updatePlan();markCustom()};
+    group.appendChild(input);$('advancedSettings').appendChild(group);
+  }
+}
+function updateAdvancedReadouts(){
+  for(const key of Object.keys(defaults))if($('value_'+key))$('value_'+key).textContent=Math.round(Number(field(key).value)*100)+'%';
+  const dependencies={textureStrength:['brushStyle','textured'],strokeLength:['strokeMode','path'],locality:['placementMode','local'],
+    pressureStrength:['pressureMode','taper'],toneStrength:['toneMode','dark-light'],paintLoad:['paintMode','dry']};
+  for(const [key,[mode,value]] of Object.entries(dependencies))if(field(key))field(key).disabled=busy||field(mode).value!==value;
+  $('speed').disabled=false;$('replayMode').disabled=false;
+}
+async function loadPresets(selected='classic'){
+  const schema=await api('/api/presets');defaults=schema.defaults;presets=schema.presets;
+  if(!presetsReady)buildAdvanced(schema);
+  $('paintPreset').replaceChildren();
+  for(const preset of [...presets,{id:'custom',name:'自定义'}]){
+    const option=document.createElement('option');option.value=preset.id;
+    option.textContent=preset.name+(preset.builtin?' · 内置':'');$('paintPreset').appendChild(option);
+  }
+  presetsReady=true;
+  const preset=presets.find(p=>p.id===selected)||presets[0];
+  applySettings(preset.settings,preset.id);setBusy(busy);
+}
+$('paintPreset').onchange=()=>{
+  const preset=presets.find(p=>p.id===$('paintPreset').value);
+  if(preset)applySettings(preset.settings,preset.id);
+  else{editingPresetId=null;$('presetName').value='';markCustom()}
+};
+$('savePreset').onclick=async()=>{
+  if(!validateControls())return;
+  $('savePreset').disabled=true;
+  try{
+    const name=$('presetName').value.trim(),original=presets.find(p=>p.id===editingPresetId);
+    const id=original?.name===name?editingPresetId:null;
+    const {preset}=await api('/api/presets',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,name,settings:readSettings()})});
+    await loadPresets(preset.id);$('presetStatus').textContent='已保存到 presets.json：'+preset.name;
+  }catch(error){$('presetStatus').textContent=error.message}finally{setBusy(busy)}
+};
+function validateControls(){
+  for(const input of document.querySelectorAll('.generation input,.generation select'))if(!input.reportValidity())return false;
+  return true;
+}
 function updatePlan(){
+  const maximum=Number($('setting_maxDiameter')?.value)||35;
+  $('minDiameter').max=maximum;
   const minimum=Number($('minDiameter').value),iterations=Number($('iterations').value);
   $('iterationsNumber').value=iterations;$('iterationsNumber').setCustomValidity('');
   $('minDiameterValue').textContent=minimum+' px';$('iterationsValue').textContent=iterations+' 次';
   $('brushSelect').querySelector('option[value="ellipse"]').textContent=`椭圆刷（前 ${Math.min(3,iterations-1)} 阶段纯圆）`;
   const indices=iterations<=20?Array.from({length:iterations},(_,i)=>i):[0,1,2,null,iterations-3,iterations-2,iterations-1];
-  const sizes=indices.map(i=>i===null?'…':Number((35+(minimum-35)*i/(iterations-1)).toFixed(2)));
+  const sizes=indices.map(i=>i===null?'…':Number((maximum+(minimum-maximum)*i/(iterations-1)).toFixed(2)));
   $('sizePlan').textContent='笔刷尺寸：'+sizes.join(' → ')+' px。每次迭代对应一个阶段，最小颗粒度越大，保留的笔触块感越强。';
+  updateAdvancedReadouts();
 }
 function setIterations(value){
   if(!Number.isSafeInteger(value)||value<2){
@@ -124,12 +231,15 @@ function setIterations(value){
   $('iterations').value=value;updatePlan();return true;
 }
 function restorePlan(job){
+  if(job.settings&&presetsReady){applySettings(job.settings,job.preset?.id);return}
   if(job.minDiameter!==undefined)$('minDiameter').value=job.minDiameter;
   if(job.stages!==undefined)setIterations(job.stages);
   updatePlan();
 }
-$('minDiameter').oninput=$('iterations').oninput=updatePlan;updatePlan();
-$('iterationsNumber').oninput=()=>setIterations(Number($('iterationsNumber').value));
+$('minDiameter').oninput=$('iterations').oninput=()=>{updatePlan();markCustom()};updatePlan();
+$('iterationsNumber').oninput=()=>{setIterations(Number($('iterationsNumber').value));markCustom()};
+$('replayMode').onchange=()=>{resetPlaybackClock();markCustom();updateAdvancedReadouts()};
+$('speed').onchange=()=>{resetPlaybackClock();markCustom()};
 function background(){
   ctx.fillStyle='#30231e';ctx.fillRect(0,0,canvas.width,canvas.height);
 }
@@ -159,15 +269,21 @@ $('toggleStages').onclick=()=>{
 function tick(t){
   if(!playing)return;
   const speed=Number($('speed').value);
-  const amount=Math.max(1,Math.floor(speed*5));
+  const first=playbackLast===null;
+  const elapsed=first?0:Math.min(250,Math.max(0,t-playbackLast));
+  playbackLast=t;
+  const rate=($('replayMode').value==='single'?60:300)*speed;
+  playbackCarry+=elapsed*rate/1000;
+  const amount=first?1:Math.floor(playbackCarry+1e-7);
+  if(!first)playbackCarry=Math.max(0,playbackCarry-amount);
   const end=Math.min(strokes.length,index+amount);
   for(;index<end;index++)dab(strokes[index]);
   updateUI();
   if(index>=strokes.length){playing=false;return;}
   raf=requestAnimationFrame(tick);
 }
-function play(){if(!data||playing)return;if(index>=strokes.length)drawUntil(0);playing=true;raf=requestAnimationFrame(tick)}
-function pause(){playing=false;cancelAnimationFrame(raf)}
+function play(){if(!data||playing)return;if(index>=strokes.length)drawUntil(0);resetPlaybackClock();playing=true;raf=requestAnimationFrame(tick)}
+function pause(){playing=false;cancelAnimationFrame(raf);resetPlaybackClock()}
 $('play').onclick=play;$('pause').onclick=pause;$('reset').onclick=()=>{pause();drawUntil(0)};
 $('progress').oninput=e=>{pause();drawUntil(Math.round(Number(e.target.value)*strokes.length))};
 $('stageList').addEventListener('click',e=>{
@@ -187,7 +303,7 @@ async function checkServer(){
     const r=await fetch('/api/status',{cache:'no-store'});
     if(!r.ok)throw Error();
     const status=await r.json();
-    if(status.apiVersion!==3||status.restartRequired)throw Error();
+    if(status.apiVersion!==4||status.restartRequired)throw Error();
     generationReady=true;setBusy(busy);
   }catch{
     generationReady=false;setBusy(busy);
@@ -198,14 +314,19 @@ function setBusy(value){
   busy=value;
   $('imageSelect').disabled=busy||!images.length;
   $('refreshImages').disabled=busy;
-  $('generate').disabled=busy||!images.length||!generationReady;
+  $('generate').disabled=busy||!images.length||!generationReady||!presetsReady;
   $('brushSelect').disabled=busy;$('directionSelect').disabled=busy;
   $('minDiameter').disabled=busy;$('iterations').disabled=busy;$('iterationsNumber').disabled=busy;
+  $('paintPreset').disabled=busy||!presetsReady;$('presetName').disabled=busy;
+  $('savePreset').disabled=busy||!generationReady||!presetsReady;
+  for(const input of document.querySelectorAll('#advancedSettings input,#advancedSettings select'))input.disabled=busy;
+  updateAdvancedReadouts();
 }
 function clearPainting(message){
   pause();data=null;strokes=[];index=0;stageNames=[];stageCounts=[];
   $('stageList').replaceChildren();$('exports').hidden=true;
   $('stageList').classList.remove('expanded');$('stageList').scrollTop=0;
+  loadedSettings=null;$('resultSettings').textContent='请选择一个结果。';$('useResultSettings').disabled=true;
   for(const id of ['play','pause','reset','progress'])$(id).disabled=true;
   background();updateUI();$('loadStatus').textContent=message;
 }
@@ -221,7 +342,13 @@ async function loadPainting(showFinal=false,expected=null){
     if(version!==loadVersion)return;
     if(expected&&(d.stageNames.length!==expected.stages||d.minDiameter!==expected.minDiameter))
       throw Error('输出参数与请求不一致，请重启服务后重新生成。');
+    if(expected?.settings&&Object.keys(expected.settings).some(key=>d.settings?.[key]!==expected.settings[key]))
+      throw Error('输出画法参数与请求不一致，请重启服务后重新生成。');
   data=d;strokes=d.strokes;stageNames=d.stageNames;
+  loadedSettings=d.settings||{...defaults,brush:d.brush||'ellipse',direction:d.direction==='tensor'?'tensor':'sobel',stages:d.stageNames.length,
+    minDiameter:d.minDiameter??d.stageBrushDiameters.at(-1),maxDiameter:d.maxDiameter??d.stageBrushDiameters[0],seed:d.seed??defaults.seed};
+  $('resultSettings').textContent=JSON.stringify({preset:d.preset||{name:'历史画法'},settings:loadedSettings,algorithmVersion:d.algorithmVersion??'历史版本',codeRevision:d.codeRevision,gitCommit:d.gitCommit},null,2);
+  $('useResultSettings').disabled=!presetsReady;
   canvas.width=d.width;canvas.height=d.height;
   let total=0;stageCounts=d.stageStrokeCounts.map(n=>(total+=n));
   $('loadStatus').textContent=`${item.label} · 已载入 ${strokes.length.toLocaleString()} 笔`;
@@ -235,6 +362,11 @@ async function loadPainting(showFinal=false,expected=null){
     drawUntil(showFinal?strokes.length:0);
   }catch(err){if(version===loadVersion)clearPainting(err.message)}
 }
+$('useResultSettings').onclick=()=>{
+  if(!loadedSettings)return;
+  const equal=p=>Object.keys(defaults).every(k=>p.settings[k]===loadedSettings[k]);
+  applySettings(loadedSettings,presets.find(equal)?.id||'custom');
+};
 async function refreshImages(preferred){
   const response=await api('/api/images');
   const selected=preferred||$('imageSelect').value;
@@ -271,8 +403,6 @@ async function pollJob(){
     if(!job)throw Error('未找到生成任务');
     $('generationStatus').textContent=`${job.image}：${job.message}`;
     if(job.status==='running'){setTimeout(pollJob,700);return}
-    $('brushSelect').value=job.brush;$('directionSelect').value=job.direction;
-    restorePlan(job);
     await refreshImages(job.image);
     if(job.status==='completed'){
       await refreshOutputs(job.outputId);
@@ -286,6 +416,7 @@ async function pollJob(){
 }
 $('imageSelect').onchange=()=>{$('generationStatus').textContent='点击生成笔触可生成所选图片，结果与当前回放分别管理。'};
 $('brushSelect').onchange=$('directionSelect').onchange=()=>{
+  markCustom();
   $('generationStatus').textContent='按当前笔刷与方向生成结果，各组合分别保存。';
 };
 $('refreshImages').onclick=async()=>{
@@ -296,13 +427,14 @@ $('refreshOutputs').onclick=async()=>{
   try{await refreshOutputs();await loadPainting()}catch(err){$('loadStatus').textContent=err.message}
 };
 $('generate').onclick=async()=>{
-  if(!$('iterationsNumber').reportValidity())return;
+  if(!validateControls())return;
   pause();setBusy(true);
   try{
     await checkServer();
-    const request={image:$('imageSelect').value,brush:$('brushSelect').value,direction:$('directionSelect').value,minDiameter:Number($('minDiameter').value),stages:Number($('iterations').value)};
+    const settings=readSettings();
+    const request={image:$('imageSelect').value,brush:settings.brush,direction:settings.direction,minDiameter:settings.minDiameter,stages:settings.stages,settings,presetId:$('paintPreset').value};
     const {job}=await api('/api/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(request)});
-    if(job.stages!==request.stages||job.minDiameter!==request.minDiameter)
+    if(job.stages!==request.stages||job.minDiameter!==request.minDiameter||Object.keys(settings).some(key=>job.settings?.[key]!==settings[key]))
       throw Error('服务没有接收所选参数，请关闭旧 CMD 后重新运行 run.bat。');
     $('generationStatus').textContent=`${job.image}：已接收最小 ${job.minDiameter} px、${job.stages} 步。${job.message}`;pollJob();
   }catch(err){setBusy(false);$('generationStatus').textContent=err.message}
@@ -311,7 +443,7 @@ clearPainting('请选择输入图片');
 (async()=>{
   try{await checkServer()}catch(err){$('generationStatus').textContent=err.message}
   try{
-    await Promise.all([refreshImages(),refreshOutputs()]);
+    await Promise.all([refreshImages(),refreshOutputs(),loadPresets()]);
     const {job}=await api('/api/job');
     if(generationReady&&job?.status==='running'){
       if(images.some(i=>i.name===job.image))$('imageSelect').value=job.image;

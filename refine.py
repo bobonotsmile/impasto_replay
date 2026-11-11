@@ -8,9 +8,11 @@ import math
 from pathlib import Path
 import shutil
 import tempfile
+import subprocess
 
 from PIL import Image, ImageDraw, ImageOps
 from playwright.sync_api import sync_playwright
+from painting_settings import normalize_settings, settings_suffix, classify_preset, builtin_presets
 
 ROOT = Path(__file__).resolve().parent
 EXTENSIONS = {'.png', '.jpg', '.jpeg', '.webp', '.bmp', '.tif', '.tiff'}
@@ -58,13 +60,20 @@ def input_path(name, root=ROOT):
     return path
 
 
-def output_path(name, root=ROOT, brush='ellipse', direction='sobel', stages=10, min_diameter=5, max_diameter=35):
+def output_path(name, root=ROOT, brush='ellipse', direction='sobel', stages=10, min_diameter=5, max_diameter=35, settings=None):
     # Retain the extension to keep photo.jpg and photo.png in separate folders.
-    return root / 'output' / name / f'{brush}-{direction}' / f'{max_diameter:g}-{min_diameter:g}px-{stages}stages'
+    suffix=settings_suffix(settings) if settings else ''
+    return root / 'output' / name / f'{brush}-{direction}' / f'{max_diameter:g}-{min_diameter:g}px-{stages}stages{suffix}'
 
 
 def generate(image='source.png', stages=10, seed=20261110, browser_path=None,
-             progress=print, root=ROOT, brush='ellipse', direction='sobel', min_diameter=5, max_diameter=35):
+             progress=print, root=ROOT, brush='ellipse', direction='sobel', min_diameter=5, max_diameter=35,
+             settings=None, preset=None):
+    settings=normalize_settings(settings if settings is not None else dict(brush=brush,direction=direction,stages=stages,
+                                seed=seed,minDiameter=min_diameter,maxDiameter=max_diameter))
+    brush,direction=settings['brush'],settings['direction']
+    stages,seed=settings['stages'],settings['seed']
+    min_diameter,max_diameter=settings['minDiameter'],settings['maxDiameter']
     validate_settings(stages, min_diameter, max_diameter)
     if not isinstance(brush, str) or not isinstance(direction, str) or brush not in BRUSHES or direction not in DIRECTIONS:
         raise ValueError('笔刷或方向选项无效')
@@ -86,8 +95,25 @@ def generate(image='source.png', stages=10, seed=20261110, browser_path=None,
     data = dict(width=width, height=height, stageNames=[], stageBrushDiameters=[],
                 stageStrokeCounts=[], strokes=[], sourceName=image, sourceSHA256=digest,
                 rendererVersion=RENDERER_VERSION, brush=brush, direction=direction, roundStages=round_stages,
-                minDiameter=min_diameter, maxDiameter=max_diameter, stageCount=stages, sizeSchedule='linear')
+                minDiameter=min_diameter, maxDiameter=max_diameter, stageCount=stages, sizeSchedule='linear',
+                settings=settings,preset=preset or classify_preset(settings,builtin_presets()),seed=seed,algorithmVersion=3)
+    revision=hashlib.sha256()
+    for filename in ['refine.py','painting_settings.py','web/brush.js','web/refine.js']:
+        revision.update((ROOT/filename).read_bytes())
+    data['codeRevision']=revision.hexdigest()
+    try:
+        data['gitCommit']=subprocess.run(['git','rev-parse','HEAD'],cwd=ROOT,capture_output=True,text=True,check=True).stdout.strip()
+    except (OSError,subprocess.CalledProcessError):
+        data['gitCommit']=None
     specs = make_specs(width, height, brush, direction, stages, min_diameter, max_diameter)
+    if settings['strokeBudget']:
+        budget=settings['strokeBudget'];total=sum(s['count'] for s in specs)
+        if budget<total:
+            allocations=[budget*s['count']/total for s in specs]
+            for spec,allocation in zip(specs,allocations):
+                spec['count']=math.floor(allocation)
+            for index in sorted(range(stages),key=lambda i:allocations[i]%1,reverse=True)[:budget-sum(s['count'] for s in specs)]:
+                specs[index]['count']+=1
     progress('正在从空白画布生成笔触…')
     with sync_playwright() as p:
         launch = {'headless': True}
@@ -105,7 +131,7 @@ def generate(image='source.png', stages=10, seed=20261110, browser_path=None,
             result = page.evaluate('(args)=>refinePainting(...args)', [data, source_url, specs, seed])
         finally:
             browser.close()
-    output = output_path(image, root, brush, direction, stages, min_diameter, max_diameter)
+    output = output_path(image, root, brush, direction, stages, min_diameter, max_diameter, settings)
     output.parent.mkdir(parents=True, exist_ok=True)
     progress('正在保存阶段图片与笔触数据…')
     with tempfile.TemporaryDirectory(prefix='.painting-', dir=output.parent) as temp:
@@ -127,7 +153,8 @@ def generate(image='source.png', stages=10, seed=20261110, browser_path=None,
         metadata = dict(seed=seed, sourceName=image, sourceSHA256=digest,
                         originalSize=original_size, canvasSize=[width,height], stageCount=stages,
                         rendererVersion=RENDERER_VERSION, brush=brush, direction=direction, roundStages=round_stages,
-                        minDiameter=min_diameter, maxDiameter=max_diameter, sizeSchedule='linear')
+                        minDiameter=min_diameter, maxDiameter=max_diameter, sizeSchedule='linear',
+                        settings=settings,preset=data['preset'],algorithmVersion=3,codeRevision=data['codeRevision'],gitCommit=data['gitCommit'])
         (dest / 'refinement_metrics.json').write_text(json.dumps(dict(metadata, stages=result['metrics']), indent=2), encoding='utf-8')
         (dest / 'generation.json').write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding='utf-8')
         # Keep the previous result intact until all new artifacts are complete.
